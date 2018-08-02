@@ -181,3 +181,82 @@ def plot_durations():
 		display.clear_output(wait=True)
 		display.display(plt.gcf())
 		# not sure what this is at all... but who knows?
+
+# finally the code for training the model is needed
+# this is a pretty huge function to be honest!
+# I don't know the difference between the policy network and the target network and this is difficult
+
+def optimize_model():
+	if len(memory) < BATCH_SIZE:
+		return
+	transitions = memory.sample(BATCH_SIZE)
+
+	batch = Transition(*zip(*transitions)) # I don't know what this means?
+
+	# compute mask of non
+	non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
+                                          batch.next_state)), device=device, dtype=torch.uint8)
+    non_final_next_states = torch.cat([s for s in batch.next_state
+                                                if s is not None])
+    state_batch = torch.cat(batch.state)
+    action_batch = torch.cat(batch.action)
+    reward_batch = torch.cat(batch.reward)
+    # god knows what any of this means?
+    state_action_values = policy_net(state_batch).gather(1, action_batch)
+    next_state_values = torch.zeros(BATCH_SIZE, device=device)
+    next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0].detach()
+    # Compute the expected Q values
+    expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+
+    # Compute Huber loss
+    loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
+
+    # Optimize the model
+    optimizer.zero_grad()
+    loss.backward()
+    for param in policy_net.parameters():
+        param.grad.data.clamp_(-1, 1)
+    optimizer.step()
+    # I'm not suer I'm learning torch to any reasonable level like this?
+
+# now it is the main training loop - reset environment and initialie state tensor, then sample an action
+# execute it, observe the next screen and the reward, and optimize ou model again!
+num_episodes = 50
+for i_eposode in range(num_episodes):
+	env.reset() # reset environment
+	last_screen = get_screen()
+	current_screen = get_screen() # not sure these are the same
+	state = current_screen - last_screen
+	for t in count(): # what on earth is this
+	action = select_action(state)
+	_, reward, done, _ = env.step(action.item())#this uses the gym api I have no idea
+	reward = torch.tensor([reward], device=device)
+
+	#observe new state
+	last_screen = current_screen
+	current_screen = get_screen()
+	if not done:
+		next_state = current_screen - last_screen
+	else:
+		next_state =None
+
+	# store the transision
+	memory.push(state, action, next_state, reward)
+	state = next_state
+
+	# optimize model
+	optimize_model()
+	if done:
+		episode_durations.append(t+1)
+		plot_durations()
+		break
+
+	# update target network
+	if i_eposode % TARGET_UPDATE == 0:
+		target_net.load_state_dict(policy_net.steps_dict)
+
+print("Complete")
+env.render()
+env.close()
+plt.ioff()
+plt.show()
